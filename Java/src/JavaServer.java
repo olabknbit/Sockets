@@ -1,5 +1,3 @@
-package javaserver;
-
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -18,54 +16,47 @@ import java.util.Set;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import javafx.util.Pair;
-import threads.ClientThreadTCP;
-import threads.ClientThreadUDP;
 
 public class JavaServer {
 
     private static int portNumber = 12345;
+    public static final String multicastIP = "230.1.1.1";
+    public static final int multicastPort = 12305;
     private static ServerSocket TCPSocket = null;
     private static DatagramSocket UDPSocket = null;
-    private static Map<Integer, Pair<Socket, InetAddress>> clients = new HashMap<>();
+    private static Map<String, Socket> clients = new HashMap<>();
     private static int clientIds = 0;
     
-    public static void sendMessageOverTCP(int id, String msg){
-        Socket authorSocket = clients.get(id).getKey();
+    public static void sendMessageOverTCP(String id, String msg){
         try{
-            for (Pair<Socket, InetAddress> pair : clients.values()){
-                Socket clientSocket = pair.getKey();
-                if (clientSocket != authorSocket){
-                    PrintWriter out = new PrintWriter(clientSocket.getOutputStream(), true);
+            for (Map.Entry<String, Socket> client : clients.entrySet()){
+                if (!id.equals(client.getKey())){
+                    PrintWriter out = new PrintWriter(client.getValue().getOutputStream(), true);
                     out.println(msg);
                 }
             }
         } catch(Exception ex){
-            Logger.getLogger(ClientThreadTCP.class.getName()).log(Level.SEVERE, null, ex);
+            Logger.getLogger(ThreadTCP.class.getName()).log(Level.SEVERE, null, ex);
         }
     }
     
-    public static void sendMessageOverUDP(InetAddress authorAddress, String msg){
+    public static void sendMessageOverUDP(String id, String msg){
         byte[] sendBuffer = msg.getBytes();
         try{
-            for (Pair<Socket, InetAddress> pair : clients.values()){
-                InetAddress address = pair.getValue();
-                if (address != null && address != authorAddress){
-                    DatagramPacket sendPacket = new DatagramPacket(sendBuffer, sendBuffer.length, address, portNumber);
+            for (Map.Entry<String, Socket> client : clients.entrySet()){
+                Socket socket = client.getValue();
+                if (!client.getKey().equals(id)){
+                    
+                    InetAddress address = InetAddress.getByName("localhost");
+                    DatagramPacket sendPacket = new DatagramPacket(sendBuffer, sendBuffer.length, address, socket.getPort());
                     UDPSocket.send(sendPacket);
+                    
                 }
             }
         } catch(Exception ex){
-            Logger.getLogger(ClientThreadTCP.class.getName()).log(Level.SEVERE, null, ex);
+            Logger.getLogger(ThreadTCP.class.getName()).log(Level.SEVERE, null, ex);
         }
     }
-    
-    
-    
-    public static void updateUDPClientAddress(int clientId, InetAddress address){
-        Socket socket = clients.get(clientId).getKey();
-        clients.put(clientId, new Pair<>(socket, address));
-    }
-    
 
     public static void main(String[] args)throws IOException {
         System.out.println("JAVA SERVER");  
@@ -73,18 +64,20 @@ public class JavaServer {
         try {
             TCPSocket = new ServerSocket(portNumber);
             UDPSocket = new DatagramSocket(portNumber);
+            
+            ThreadUDP u = new ThreadUDP(UDPSocket, true);
+            u.start();
 
             while(true){
                 Socket clientSocket = TCPSocket.accept();
-                int clientId = getNewClientId();
-                clients.put(clientId, new Pair<>(clientSocket, null));
+                String clientId = getNewClientId();
+                clients.put(clientId, clientSocket);
                 sendClientId(clientSocket, clientId);
 
                 BufferedReader in = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
-                ClientThreadTCP c = new ClientThreadTCP(in, clientId, true);
-                ClientThreadUDP u = new ClientThreadUDP(UDPSocket, clientId);
+                ThreadTCP c = new ThreadTCP(in, clientId, true);
+                
                 c.start();
-                u.start();
 
             }
         } catch (IOException e) {            
@@ -99,20 +92,18 @@ public class JavaServer {
         }
     }
 
-    private static void sendClientId(Socket clientSocket, int clientId) {
+    private static void sendClientId(Socket clientSocket, String clientId) {
         try {
             PrintWriter out = new PrintWriter(clientSocket.getOutputStream(), true);
-            out.println(String.valueOf(clientId));
+            out.println(clientId);
         } catch (IOException ex) {
             Logger.getLogger(JavaServer.class.getName()).log(Level.SEVERE, null, ex);
         }
         
     }
 
-    private static int getNewClientId() {
-        int id = clientIds;
-        clientIds++;
-        return id;
+    private static String getNewClientId() {
+        return String.valueOf(clientIds++);
     }
     
 }
